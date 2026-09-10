@@ -74,13 +74,13 @@ async function findService(network) {
 
     const data = await response.json();
 
-    if (!data.status || !Array.isArray(data.services)) {
+    if (!data.status || !Array.isArray(data.data)) {
         throw new Error(data.message || "Unable to load services");
     }
 
     const wanted = network.toLowerCase();
 
-    const service = data.services.find(function (item) {
+    const service = data.data.find(function (item) {
         const name = String(
             item.network_name ||
             item.network ||
