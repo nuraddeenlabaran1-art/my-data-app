@@ -1,215 +1,417 @@
+// ===============================
+// NOORSUB - LIVE VTUGATE FRONTEND
+// ===============================
+
 const API_BASE = "";
 
-const plans = [
-  ["500MB", 150, "500MB"],
-  ["1GB", 300, "1GB"],
-  ["2GB", 600, "2GB"],
-  ["3GB", 900, "3GB"],
-  ["5GB", 1500, "5GB"]
-];
-
+// Hide all sections
 function hideAllSections() {
-  document.getElementById("homeSection").style.display = "none";
-  document.getElementById("dataSection").style.display = "none";
-  document.getElementById("airtimeSection").style.display = "none";
-  document.getElementById("billsSection").style.display = "none";
+    const sections = [
+        "homeSection",
+        "dataSection",
+        "airtimeSection",
+        "billsSection"
+    ];
+
+    sections.forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.style.display = "none";
+        }
+    });
 }
 
+// Show Home
 window.showHome = function () {
-  hideAllSections();
-  document.getElementById("homeSection").style.display = "block";
+    hideAllSections();
+
+    const home = document.getElementById("homeSection");
+
+    if (home) {
+        home.style.display = "block";
+    }
 };
 
-window.showData = function () {
-  hideAllSections();
+// Show Data
+window.showData = async function () {
+    hideAllSections();
 
-  const section = document.getElementById("dataSection");
-  section.style.display = "block";
+    const dataSection = document.getElementById("dataSection");
 
-  section.innerHTML = `
-    <button class="back-btn" onclick="showHome()">← Back</button>
+    if (dataSection) {
+        dataSection.style.display = "block";
+    }
 
-    <h2>Select Network</h2>
-    <p>Zaɓi network ɗinka:</p>
-
-    <div class="network-buttons">
-      <button onclick="showPlans('MTN')">MTN</button>
-      <button onclick="showPlans('Airtel')">Airtel</button>
-      <button onclick="showPlans('Glo')">Glo</button>
-      <button onclick="showPlans('9mobile')">9mobile</button>
-    </div>
-  `;
+    showNetworkButtons();
 };
 
-window.showPlans = function (network) {
-  const section = document.getElementById("dataSection");
-  section.style.display = "block";
+// Show network buttons
+function showNetworkButtons() {
+    const dataSection = document.getElementById("dataSection");
 
-  let html = `
-    <button class="back-btn" onclick="showData()">← Back</button>
+    if (!dataSection) return;
 
-    <h2>${network} Data Plans</h2>
-    <p>Zaɓi data bundle:</p>
+    dataSection.innerHTML = `
+        <div style="padding:20px;">
+            <h2>Buy Data</h2>
+            <p>Select your network:</p>
 
-    <div class="plans">
-  `;
-
-  plans.forEach(plan => {
-    html += `
-      <button
-        class="plan"
-        onclick="enterNumber('${network}', '${plan[0]}', ${plan[1]}, '${plan[2]}')"
-      >
-        <strong>${plan[0]}</strong>
-        <span>₦${plan[1].toLocaleString()}</span>
-      </button>
+            <div style="display:grid;gap:12px;">
+                <button onclick="showPlans('MTN')">MTN</button>
+                <button onclick="showPlans('AIRTEL')">Airtel</button>
+                <button onclick="showPlans('GLO')">Glo</button>
+                <button onclick="showPlans('9MOBILE')">9mobile</button>
+            </div>
+        </div>
     `;
-  });
+}
 
-  html += `
-    </div>
-  `;
-
-  section.innerHTML = html;
-};
-
-window.enterNumber = function (
-  network,
-  plan,
-  amount,
-  productCode
-) {
-  const section = document.getElementById("dataSection");
-  section.style.display = "block";
-
-  section.innerHTML = `
-    <button class="back-btn" onclick="showPlans('${network}')">
-      ← Back
-    </button>
-
-    <h2>${network} - ${plan}</h2>
-
-    <p>Price: ₦${amount.toLocaleString()}</p>
-
-    <div class="form-box">
-
-      <label for="phoneNumber">
-        Phone Number
-      </label>
-
-      <input
-        id="phoneNumber"
-        type="tel"
-        inputmode="numeric"
-        maxlength="11"
-        placeholder="08012345678"
-      >
-
-      <label for="email">
-        Email Address
-      </label>
-
-      <input
-        id="email"
-        type="email"
-        placeholder="you@example.com"
-      >
-
-      <button
-        class="pay-btn"
-        onclick="startPayment('${network}', '${plan}', ${amount}, '${productCode}')"
-      >
-        💳 Pay ₦${amount.toLocaleString()} with Paystack
-      </button>
-
-    </div>
-  `;
-};
-
-window.startPayment = async function (
-  network,
-  plan,
-  amount,
-  productCode
-) {
-  const phone =
-    document.getElementById("phoneNumber").value.trim();
-
-  const email =
-    document.getElementById("email").value.trim();
-
-  if (!/^0\d{10}$/.test(phone)) {
-    alert("Please enter a valid 11-digit Nigerian phone number.");
-    return;
-  }
-
-  if (!email.includes("@")) {
-    alert("Please enter a valid email address.");
-    return;
-  }
-
-  const section = document.getElementById("dataSection");
-
-  section.innerHTML = `
-    <p>Initializing secure payment...</p>
-  `;
-
-  try {
+// Find VTUGATE service
+async function findService(network) {
     const response = await fetch(
-      API_BASE + "/api/payment/initialize",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          email,
-          amount,
-          network,
-          plan,
-          productCode,
-          phone
-        })
-      }
+        `${API_BASE}/api/vtugate/services`
     );
 
     const data = await response.json();
 
-    if (!response.ok || !data.status) {
-      throw new Error(
-        data.message || "Payment initialization failed."
-      );
+    if (!data.status || !Array.isArray(data.services)) {
+        throw new Error(data.message || "Unable to load services");
     }
 
-    window.location.href = data.authorization_url;
+    const wanted = network.toLowerCase();
 
-  } catch (error) {
-    section.innerHTML = `
-      <p class="error">${error.message}</p>
+    const service = data.services.find(function (item) {
+        const name = String(
+            item.network_name ||
+            item.network ||
+            item.name ||
+            ""
+        ).toLowerCase();
 
-      <button onclick="showData()">
-        Try Again
-      </button>
+        return name.includes(wanted);
+    });
+
+    if (!service) {
+        throw new Error(`Network ${network} was not found.`);
+    }
+
+    return service;
+}
+
+// Show live plans
+window.showPlans = async function (network) {
+    const dataSection = document.getElementById("dataSection");
+
+    if (!dataSection) return;
+
+    dataSection.innerHTML = `
+        <div style="padding:20px;">
+            <h2>${network} Data Plans</h2>
+            <p>Loading live plans...</p>
+        </div>
     `;
-  }
+
+    try {
+        const service = await findService(network);
+
+        const serviceId =
+            service.service_id ||
+            service.id;
+
+        if (!serviceId) {
+            throw new Error("Service ID not found.");
+        }
+
+        const response = await fetch(
+            `${API_BASE}/api/vtugate/plans?service_id=${encodeURIComponent(serviceId)}`
+        );
+
+        const data = await response.json();
+
+        if (!data.status || !Array.isArray(data.plans)) {
+            throw new Error(
+                data.message || "Unable to load data plans."
+            );
+        }
+
+        if (data.plans.length === 0) {
+            throw new Error("No data plans available.");
+        }
+
+        let html = `
+            <div style="padding:20px;">
+                <button onclick="showData()">← Back</button>
+
+                <h2>${network} Data</h2>
+                <p>Choose a plan:</p>
+
+                <div style="display:grid;gap:12px;">
+        `;
+
+        data.plans.forEach(function (plan) {
+            const planCode =
+                plan.code ||
+                plan.plan_code ||
+                plan.product_code ||
+                "";
+
+            const price = Number(
+                plan.price ||
+                plan.amount ||
+                0
+            );
+
+            const name =
+                plan.name ||
+                plan.plan_name ||
+                plan.description ||
+                "Data Plan";
+
+            const size =
+                plan.size ||
+                plan.data_size ||
+                "";
+
+            const validity =
+                plan.validity ||
+                "";
+
+            html += `
+                <button
+                    style="
+                        padding:15px;
+                        text-align:left;
+                        border-radius:10px;
+                        border:1px solid #ddd;
+                        background:white;
+                    "
+                    onclick='enterNumber(${JSON.stringify({
+                        network: network,
+                        serviceId: serviceId,
+                        planCode: planCode,
+                        amount: price,
+                        planName: name
+                    })})'
+                >
+                    <strong>${escapeHtml(name)}</strong><br>
+                    <span>₦${price.toLocaleString()}</span>
+                    ${size ? `<br><small>${escapeHtml(String(size))}</small>` : ""}
+                    ${validity ? `<small> • ${escapeHtml(String(validity))}</small>` : ""}
+                </button>
+            `;
+        });
+
+        html += `
+                </div>
+            </div>
+        `;
+
+        dataSection.innerHTML = html;
+
+    } catch (error) {
+        dataSection.innerHTML = `
+            <div style="padding:20px;">
+                <button onclick="showData()">← Back</button>
+
+                <h2>Something went wrong</h2>
+
+                <p>${escapeHtml(error.message)}</p>
+
+                <button onclick="showPlans('${escapeHtml(network)}')">
+                    Try Again
+                </button>
+            </div>
+        `;
+    }
 };
 
+// Enter phone number
+window.enterNumber = function (plan) {
+    const dataSection = document.getElementById("dataSection");
+
+    if (!dataSection) return;
+
+    dataSection.innerHTML = `
+        <div style="padding:20px;">
+            <button onclick="showPlans('${escapeHtml(plan.network)}')">
+                ← Back
+            </button>
+
+            <h2>${escapeHtml(plan.planName)}</h2>
+
+            <p>
+                Price:
+                <strong>₦${Number(plan.amount).toLocaleString()}</strong>
+            </p>
+
+            <label>Phone Number</label>
+
+            <input
+                id="phoneNumber"
+                type="tel"
+                placeholder="08012345678"
+                maxlength="11"
+                style="
+                    width:100%;
+                    padding:12px;
+                    margin:8px 0 15px;
+                    box-sizing:border-box;
+                "
+            >
+
+            <label>Email</label>
+
+            <input
+                id="customerEmail"
+                type="email"
+                placeholder="you@example.com"
+                style="
+                    width:100%;
+                    padding:12px;
+                    margin:8px 0 15px;
+                    box-sizing:border-box;
+                "
+            >
+
+            <button
+                onclick='startPayment(${JSON.stringify(plan)})'
+                style="
+                    width:100%;
+                    padding:14px;
+                    border:0;
+                    border-radius:8px;
+                "
+            >
+                Pay ₦${Number(plan.amount).toLocaleString()}
+            </button>
+        </div>
+    `;
+};
+
+// Start Paystack payment
+window.startPayment = async function (plan) {
+    const phoneInput = document.getElementById("phoneNumber");
+    const emailInput = document.getElementById("customerEmail");
+
+    const phone = phoneInput ? phoneInput.value.trim() : "";
+    const email = emailInput ? emailInput.value.trim() : "";
+
+    if (!/^0\d{10}$/.test(phone)) {
+        alert("Please enter a valid 11-digit Nigerian phone number.");
+        return;
+    }
+
+    if (!email || !email.includes("@")) {
+        alert("Please enter a valid email address.");
+        return;
+    }
+
+    try {
+        const button = document.querySelector(
+            "#dataSection button:last-child"
+        );
+
+        if (button) {
+            button.disabled = true;
+            button.textContent = "Opening payment...";
+        }
+
+        const response = await fetch(
+            `${API_BASE}/api/payment/initialize`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    network: plan.network,
+                    serviceId: plan.serviceId,
+                    planCode: plan.planCode,
+                    phone: phone,
+                    email: email,
+                    amount: Number(plan.amount)
+                })
+            }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.status) {
+            throw new Error(
+                data.message || "Unable to initialize payment."
+            );
+        }
+
+        if (!data.authorization_url) {
+            throw new Error("Paystack payment link was not returned.");
+        }
+
+        window.location.href = data.authorization_url;
+
+    } catch (error) {
+        alert(error.message);
+
+        const button = document.querySelector(
+            "#dataSection button:last-child"
+        );
+
+        if (button) {
+            button.disabled = false;
+            button.textContent =
+                `Pay ₦${Number(plan.amount).toLocaleString()}`;
+        }
+    }
+};
+
+// Airtime placeholder
 window.showAirtime = function () {
-  hideAllSections();
+    hideAllSections();
 
-  const section =
-    document.getElementById("airtimeSection");
+    const section = document.getElementById("airtimeSection");
 
-  section.style.display = "block";
+    if (section) {
+        section.style.display = "block";
+        section.innerHTML = `
+            <div style="padding:20px;">
+                <h2>Buy Airtime</h2>
+                <p>Airtime service is coming soon.</p>
+                <button onclick="showHome()">← Home</button>
+            </div>
+        `;
+    }
 };
 
+// Bills placeholder
 window.showBills = function () {
-  hideAllSections();
+    hideAllSections();
 
-  const section =
-    document.getElementById("billsSection");
+    const section = document.getElementById("billsSection");
 
-  section.style.display = "block";
+    if (section) {
+        section.style.display = "block";
+        section.innerHTML = `
+            <div style="padding:20px;">
+                <h2>Pay Bills</h2>
+                <p>Bills service is coming soon.</p>
+                <button onclick="showHome()">← Home</button>
+            </div>
+        `;
+    }
 };
 
-console.log("Noorsub frontend is working!");
+// Escape HTML
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Start on Home
+document.addEventListener("DOMContentLoaded", function () {
+    showHome();
+
+    console.log("Noorsub frontend is working!");
+});
