@@ -7,92 +7,34 @@ const crypto = require("crypto");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
-const VTUGATE_API_KEY = process.env.VTUGATE_API_KEY;
 
-const BASE =
-  process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
+const PAYSTACK_SECRET_KEY =
+  process.env.PAYSTACK_SECRET_KEY;
 
-const VTUGATE_BASE_URL = "https://api.vtugate.com";
+const VTUGATE_API_KEY =
+  process.env.VTUGATE_API_KEY;
 
-// --------------------------------------------------
-// PAYSTACK WEBHOOK
-// --------------------------------------------------
+const PUBLIC_BASE_URL =
+  process.env.PUBLIC_BASE_URL ||
+  `http://localhost:${PORT}`;
 
-app.post(
-  "/api/paystack/webhook",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    const sig = req.headers["x-paystack-signature"];
+const VTUGATE_BASE_URL =
+  "https://api.vtugate.com";
 
-    if (!PAYSTACK_SECRET_KEY || !sig) {
-      return res.sendStatus(401);
-    }
+// Temporary order storage.
+// This is okay for sandbox testing.
+// Production should use a real database.
+const orders = new Map();
 
-    const hash = crypto
-      .createHmac("sha512", PAYSTACK_SECRET_KEY)
-      .update(req.body)
-      .digest("hex");
+/* =========================================================
+   VTUGATE HELPERS
+========================================================= */
 
-    if (hash !== sig) {
-      return res.sendStatus(401);
-    }
-
-    try {
-      const event = JSON.parse(req.body.toString());
-
-      if (event.event === "charge.success") {
-        console.log(
-          "Paystack success:",
-          event.data.reference
-        );
-      }
-
-      return res.sendStatus(200);
-    } catch (e) {
-      console.error(e);
-      return res.sendStatus(400);
-    }
-  }
-);
-
-app.use(express.json());
-
-app.use(express.static(path.join(__dirname)));
-
-// --------------------------------------------------
-// HEALTH CHECK
-// --------------------------------------------------
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: true,
-    message: "Backend is working",
-  });
-});
-
-// --------------------------------------------------
-// VTUGATE KEY STATUS
-// --------------------------------------------------
-
-app.get("/api/vtugate/status", (req, res) => {
-  const configured = Boolean(VTUGATE_API_KEY);
-
-  res.json({
-    status: configured,
-    message: configured
-      ? "VTUGATE API key is configured."
-      : "VTUGATE API key is not configured.",
-  });
-});
-
-// --------------------------------------------------
-// VTUGATE HELPER
-// --------------------------------------------------
-
-async function vtugateRequest(endpoint, body = {}) {
+async function vtugateRequest(endpoint, params = {}) {
   if (!VTUGATE_API_KEY) {
-    throw new Error("VTUGATE_API_KEY is not configured.");
+    throw new Error(
+      "VTUGATE_API_KEY is not configured."
+    );
   }
 
   const response = await fetch(
@@ -108,408 +50,933 @@ async function vtugateRequest(endpoint, body = {}) {
           `Bearer ${VTUGATE_API_KEY}`,
       },
 
-      body: new URLSearchParams(body),
+      body: new URLSearchParams(
+        Object.entries(params).reduce(
+          (out, [key, value]) => {
+            if (
+              value !== undefined &&
+              value !== null
+            ) {
+              out[key] = String(value);
+            }
+
+            return out;
+          },
+          {}
+        )
+      ),
     }
   );
 
   const data = await response.json();
 
-  return {
-    httpStatus: response.status,
-    data,
-  };
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+        `VTUGATE HTTP ${response.status}`
+    );
+  }
+
+  return data;
 }
 
-// --------------------------------------------------
-// FETCH DATA SERVICES
-// --------------------------------------------------
-//
-// VTUGATE requires:
-// service_type=data
-//
-// This returns services/providers such as MTN,
-// Airtel, Glo and 9mobile when available.
-// --------------------------------------------------
 
-app.get("/api/vtugate/services", async (req, res) => {
-  try {
-    const result = await vtugateRequest(
-      "/api/v1/fetchservices",
-      {
-        service_type: "data",
-      }
-    );
+/* =========================================================
+   FIND VTUGATE SERVICE FOR NETWORK
+========================================================= */
 
-    if (
-      result.httpStatus < 200 ||
-      result.httpStatus >= 300
-    ) {
-      return res.status(400).json({
-        status: false,
-        message:
-          result.data?.message ||
-          "Could not fetch VTUGATE data services.",
-        vtugate: result.data,
-      });
+async function getDataService(network) {
+  const result = await vtugateRequest(
+    "/api/v1/fetchservices",
+    {
+      service_type: "data",
     }
+  );
 
-    res.json(result.data);
-  } catch (e) {
-    console.error("VTUGATE services error:", e);
-
-    res.status(500).json({
-      status: false,
-      message: "Could not connect to VTUGATE.",
-    });
+  if (
+    !result.status ||
+    !Array.isArray(result.data)
+  ) {
+    throw new Error(
+      "VTUGATE did not return data services."
+    );
   }
-});
 
-// --------------------------------------------------
-// FETCH DATA PLANS
-// --------------------------------------------------
-//
-// Example:
-// /api/vtugate/plans?service_id=137
-//
-// VTUGATE requires service_id.
-// --------------------------------------------------
+  const wanted = String(network)
+    .trim()
+    .toLowerCase();
 
-app.get("/api/vtugate/plans", async (req, res) => {
-  try {
-    const serviceId = Number(req.query.service_id);
+  const service = result.data.find(
+    (item) =>
+      String(item.network_name || "")
+        .trim()
+        .toLowerCase() === wanted
+  );
 
-    if (!Number.isInteger(serviceId) || serviceId <= 0) {
-      return res.status(400).json({
-        status: false,
-        message: "A valid service_id is required.",
-      });
-    }
-
-    const result = await vtugateRequest(
-      "/api/v1/fetchdataplans",
-      {
-        service_id: String(serviceId),
-      }
+  if (!service) {
+    throw new Error(
+      `No VTUGATE data service found for ${network}.`
     );
-
-    if (
-      result.httpStatus < 200 ||
-      result.httpStatus >= 300
-    ) {
-      return res.status(400).json({
-        status: false,
-        message:
-          result.data?.message ||
-          "Could not fetch data plans.",
-        vtugate: result.data,
-      });
-    }
-
-    res.json(result.data);
-  } catch (e) {
-    console.error("VTUGATE plans error:", e);
-
-    res.status(500).json({
-      status: false,
-      message: "Could not fetch VTUGATE data plans.",
-    });
   }
-});
 
-// --------------------------------------------------
-// VTUGATE BUY DATA
-// --------------------------------------------------
-//
-// Required by VTUGATE:
-//
-// service_id
-// phone_number
-// amount
-// plan_code
-// --------------------------------------------------
+  return service;
+}
 
-app.post("/api/vtugate/buydata", async (req, res) => {
-  try {
-    const {
-      service_id,
-      phone_number,
-      amount,
-      plan_code,
-    } = req.body;
 
-    const serviceId = Number(service_id);
-    const numericAmount = Number(amount);
+/* =========================================================
+   FIND PLAN
+========================================================= */
 
-    if (
-      !Number.isInteger(serviceId) ||
-      serviceId <= 0
-    ) {
-      return res.status(400).json({
-        status: false,
-        message: "Invalid service_id.",
-      });
+async function getDataPlan(
+  serviceId,
+  planCode
+) {
+  const result = await vtugateRequest(
+    "/api/v1/fetchdataplans",
+    {
+      service_id: serviceId,
     }
+  );
 
-    if (!/^0\d{10}$/.test(String(phone_number))) {
-      return res.status(400).json({
-        status: false,
-        message: "Invalid Nigerian phone number.",
-      });
-    }
-
-    if (
-      !Number.isFinite(numericAmount) ||
-      numericAmount <= 0
-    ) {
-      return res.status(400).json({
-        status: false,
-        message: "Invalid amount.",
-      });
-    }
-
-    if (!plan_code) {
-      return res.status(400).json({
-        status: false,
-        message: "plan_code is required.",
-      });
-    }
-
-    const result = await vtugateRequest(
-      "/api/v1/buydata",
-      {
-        service_id: String(serviceId),
-        phone_number: String(phone_number),
-        amount: String(numericAmount),
-        plan_code: String(plan_code),
-      }
+  if (
+    !result.status ||
+    !result.data ||
+    !Array.isArray(result.data.data_plans)
+  ) {
+    throw new Error(
+      "VTUGATE did not return data plans."
     );
-
-    if (
-      result.httpStatus < 200 ||
-      result.httpStatus >= 300
-    ) {
-      return res.status(400).json({
-        status: false,
-        message:
-          result.data?.message ||
-          "VTUGATE data purchase failed.",
-        vtugate: result.data,
-      });
-    }
-
-    res.json(result.data);
-  } catch (e) {
-    console.error("VTUGATE buy data error:", e);
-
-    res.status(500).json({
-      status: false,
-      message: "Could not complete VTUGATE data purchase.",
-    });
   }
-});
 
-// --------------------------------------------------
-// PAYSTACK INITIALIZE
-// --------------------------------------------------
+  const plan = result.data.data_plans.find(
+    (item) =>
+      String(item.code) ===
+      String(planCode)
+  );
 
-app.post("/api/payment/initialize", async (req, res) => {
+  if (!plan) {
+    throw new Error(
+      `Data plan ${planCode} was not found.`
+    );
+  }
+
+  return plan;
+}
+
+
+/* =========================================================
+   BUY DATA FROM VTUGATE
+========================================================= */
+
+async function buyData({
+  serviceId,
+  phone,
+  amount,
+  planCode,
+}) {
+  return await vtugateRequest(
+    "/api/v1/buydata",
+    {
+      service_id: serviceId,
+      phone_number: phone,
+      amount: amount,
+      plan_code: planCode,
+    }
+  );
+}
+
+
+/* =========================================================
+   PAYSTACK HELPERS
+========================================================= */
+
+async function verifyPaystack(reference) {
+  if (!PAYSTACK_SECRET_KEY) {
+    throw new Error(
+      "PAYSTACK_SECRET_KEY is not configured."
+    );
+  }
+
+  const response = await fetch(
+    `https://api.paystack.co/transaction/verify/${encodeURIComponent(
+      reference
+    )}`,
+    {
+      headers: {
+        Authorization:
+          `Bearer ${PAYSTACK_SECRET_KEY}`,
+      },
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok || !data.status) {
+    throw new Error(
+      data.message ||
+        "Paystack verification failed."
+    );
+  }
+
+  return data.data;
+}
+
+
+/* =========================================================
+   FULFILL ORDER
+========================================================= */
+
+async function fulfillOrder(reference) {
+  const order = orders.get(reference);
+
+  if (!order) {
+    throw new Error(
+      "Order was not found."
+    );
+  }
+
+  // Prevent duplicate VTUGATE purchases.
+  if (
+    order.status === "fulfilled" ||
+    order.status === "processing"
+  ) {
+    return order;
+  }
+
+  order.status = "processing";
+  orders.set(reference, order);
+
   try {
-    if (!PAYSTACK_SECRET_KEY) {
-      return res.status(500).json({
-        status: false,
-        message:
-          "PAYSTACK_SECRET_KEY is not configured.",
-      });
+    /* -----------------------------------------
+       1. Verify Paystack
+    ----------------------------------------- */
+
+    const payment =
+      await verifyPaystack(reference);
+
+    if (payment.status !== "success") {
+      throw new Error(
+        `Payment status is ${payment.status}.`
+      );
     }
 
-    const {
-      email,
-      amount,
-      network,
-      plan,
-      productCode,
-      phone,
-    } = req.body;
+    /* -----------------------------------------
+       2. Verify amount
+       Paystack amount is in kobo.
+    ----------------------------------------- */
+
+    const paidAmount =
+      Number(payment.amount);
+
+    const expectedAmount =
+      Math.round(
+        Number(order.amount) * 100
+      );
+
+    if (paidAmount !== expectedAmount) {
+      throw new Error(
+        "Payment amount does not match order amount."
+      );
+    }
+
+    /* -----------------------------------------
+       3. Find VTUGATE service
+    ----------------------------------------- */
+
+    const service =
+      await getDataService(order.network);
+
+    /* -----------------------------------------
+       4. Find plan
+    ----------------------------------------- */
+
+    const plan =
+      await getDataPlan(
+        service.service_id,
+        order.productCode
+      );
+
+    /* -----------------------------------------
+       5. Verify plan price
+    ----------------------------------------- */
+
+    const planPrice =
+      Number(plan.price);
+
+    const orderAmount =
+      Number(order.amount);
 
     if (
-      !email ||
-      !amount ||
-      !network ||
-      !plan ||
-      !productCode ||
-      !/^0\d{10}$/.test(String(phone))
+      Number.isFinite(planPrice) &&
+      planPrice !== orderAmount
     ) {
-      return res.status(400).json({
-        status: false,
-        message:
-          "Missing or invalid payment information.",
-      });
+      throw new Error(
+        `Plan price mismatch. VTUGATE price is ${planPrice}, order price is ${orderAmount}.`
+      );
     }
 
-    const reference =
-      `MDA-${Date.now()}-${crypto
-        .randomBytes(4)
-        .toString("hex")}`;
+    /* -----------------------------------------
+       6. Buy data
+    ----------------------------------------- */
 
-    const response = await fetch(
-      "https://api.paystack.co/transaction/initialize",
-      {
-        method: "POST",
+    const vtu =
+      await buyData({
+        serviceId: service.service_id,
+        phone: order.phone,
+        amount: order.amount,
+        planCode: order.productCode,
+      });
 
-        headers: {
-          Authorization:
-            `Bearer ${PAYSTACK_SECRET_KEY}`,
+    order.payment = {
+      status: payment.status,
+      reference:
+        payment.reference,
+      amount:
+        payment.amount,
+      paidAt:
+        payment.paid_at,
+    };
 
-          "Content-Type":
-            "application/json",
-        },
+    order.vtugate = vtu;
 
-        body: JSON.stringify({
-          email,
+    /* -----------------------------------------
+       7. Determine final state
+    ----------------------------------------- */
 
-          amount: String(
-            Math.round(Number(amount) * 100)
-          ),
+    if (
+      vtu.status === true &&
+      vtu.data &&
+      vtu.data.provider_status === true
+    ) {
+      order.status = "fulfilled";
+    } else {
+      order.status = "pending";
+    }
 
-          currency: "NGN",
+    orders.set(reference, order);
 
-          reference,
-
-          callback_url:
-            `${BASE}/payment/callback`,
-
-          metadata: {
-            network,
-            plan,
-            productCode,
-            phone,
-          },
-        }),
-      }
+    return order;
+  } catch (error) {
+    console.error(
+      "FULFILLMENT ERROR:",
+      error
     );
 
-    const data = await response.json();
+    order.status = "failed";
+    order.error = error.message;
 
-    if (!response.ok || !data.status) {
-      return res.status(400).json({
-        status: false,
-        message:
-          data.message ||
-          "Paystack initialization failed.",
-      });
+    orders.set(reference, order);
+
+    throw error;
+  }
+}
+
+
+/* =========================================================
+   PAYSTACK WEBHOOK
+========================================================= */
+
+app.post(
+  "/api/paystack/webhook",
+
+  express.raw({
+    type: "application/json",
+  }),
+
+  async (req, res) => {
+    try {
+      const signature =
+        req.headers[
+          "x-paystack-signature"
+        ];
+
+      if (
+        !PAYSTACK_SECRET_KEY ||
+        !signature
+      ) {
+        return res.sendStatus(401);
+      }
+
+      const hash =
+        crypto
+          .createHmac(
+            "sha512",
+            PAYSTACK_SECRET_KEY
+          )
+          .update(req.body)
+          .digest("hex");
+
+      if (hash !== signature) {
+        return res.sendStatus(401);
+      }
+
+      const event =
+        JSON.parse(
+          req.body.toString()
+        );
+
+      console.log(
+        "Paystack webhook:",
+        event.event
+      );
+
+      if (
+        event.event ===
+        "charge.success"
+      ) {
+        const reference =
+          event.data &&
+          event.data.reference;
+
+        if (
+          reference &&
+          orders.has(reference)
+        ) {
+          try {
+            await fulfillOrder(
+              reference
+            );
+          } catch (error) {
+            console.error(
+              "Webhook fulfillment error:",
+              error.message
+            );
+          }
+        }
+      }
+
+      return res.sendStatus(200);
+    } catch (error) {
+      console.error(
+        "Webhook error:",
+        error
+      );
+
+      return res.sendStatus(500);
     }
+  }
+);
 
+
+/* =========================================================
+   JSON MIDDLEWARE
+========================================================= */
+
+app.use(
+  express.json()
+);
+
+
+/* =========================================================
+   STATIC WEBSITE
+========================================================= */
+
+app.use(
+  express.static(
+    path.join(__dirname)
+  )
+);
+
+
+/* =========================================================
+   HEALTH CHECK
+========================================================= */
+
+app.get(
+  "/api/health",
+  (req, res) => {
     res.json({
       status: true,
-
-      authorization_url:
-        data.data.authorization_url,
-
-      access_code:
-        data.data.access_code,
-
-      reference:
-        data.data.reference,
-    });
-  } catch (e) {
-    console.error("Paystack initialize error:", e);
-
-    res.status(500).json({
-      status: false,
-      message: "Server error.",
+      message:
+        "Backend is working",
     });
   }
-});
+);
 
-// --------------------------------------------------
-// PAYSTACK CALLBACK
-// --------------------------------------------------
 
-app.get("/payment/callback", async (req, res) => {
-  try {
-    const reference = req.query.reference;
+/* =========================================================
+   VTUGATE STATUS
+========================================================= */
 
-    if (!reference || !PAYSTACK_SECRET_KEY) {
-      return res.status(400).send(
-        "Missing payment reference."
+app.get(
+  "/api/vtugate/status",
+  (req, res) => {
+    const configured =
+      Boolean(
+        process.env.VTUGATE_API_KEY
       );
-    }
 
-    const response = await fetch(
-      `https://api.paystack.co/transaction/verify/${encodeURIComponent(
-        reference
-      )}`,
-      {
-        headers: {
-          Authorization:
-            `Bearer ${PAYSTACK_SECRET_KEY}`,
-        },
+    res.json({
+      status: configured,
+
+      message: configured
+        ? "VTUGATE API key is configured."
+        : "VTUGATE API key is not configured.",
+    });
+  }
+);
+
+
+/* =========================================================
+   TEST VTUGATE DATA SERVICES
+========================================================= */
+
+app.get(
+  "/api/vtugate/services",
+  async (req, res) => {
+    try {
+      const result =
+        await vtugateRequest(
+          "/api/v1/fetchservices",
+          {
+            service_type: "data",
+          }
+        );
+
+      res.json(result);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        status: false,
+        message: error.message,
+      });
+    }
+  }
+);
+
+
+/* =========================================================
+   FETCH DATA PLANS
+========================================================= */
+
+app.get(
+  "/api/vtugate/plans",
+  async (req, res) => {
+    try {
+      const serviceId =
+        Number(
+          req.query.service_id
+        );
+
+      if (!serviceId) {
+        return res.status(400).json({
+          status: false,
+          message:
+            "service_id is required.",
+        });
       }
-    );
 
-    const data = await response.json();
+      const result =
+        await vtugateRequest(
+          "/api/v1/fetchdataplans",
+          {
+            service_id: serviceId,
+          }
+        );
 
-    if (!response.ok || !data.status) {
+      res.json(result);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        status: false,
+        message: error.message,
+      });
+    }
+  }
+);
+
+
+/* =========================================================
+   PAYSTACK PAYMENT INITIALIZATION
+========================================================= */
+
+app.post(
+  "/api/payment/initialize",
+  async (req, res) => {
+    try {
+      if (!PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({
+          status: false,
+          message:
+            "PAYSTACK_SECRET_KEY is not configured.",
+        });
+      }
+
+      const {
+        email,
+        amount,
+        network,
+        plan,
+        productCode,
+        phone,
+      } = req.body;
+
+      /* -----------------------------------------
+         Validate input
+      ----------------------------------------- */
+
+      if (
+        !email ||
+        !amount ||
+        !network ||
+        !plan ||
+        !productCode ||
+        !/^0\d{10}$/.test(phone)
+      ) {
+        return res.status(400).json({
+          status: false,
+          message:
+            "Missing or invalid payment information.",
+        });
+      }
+
+      const numericAmount =
+        Number(amount);
+
+      if (
+        !Number.isFinite(
+          numericAmount
+        ) ||
+        numericAmount <= 0
+      ) {
+        return res.status(400).json({
+          status: false,
+          message:
+            "Invalid amount.",
+        });
+      }
+
+      /* -----------------------------------------
+         Create unique reference
+      ----------------------------------------- */
+
+      const reference =
+        `MDA-${Date.now()}-${crypto
+          .randomBytes(4)
+          .toString("hex")}`;
+
+      /* -----------------------------------------
+         Save pending order
+      ----------------------------------------- */
+
+      orders.set(
+        reference,
+        {
+          reference,
+
+          email,
+
+          amount:
+            numericAmount,
+
+          network,
+
+          plan,
+
+          productCode,
+
+          phone,
+
+          status:
+            "pending_payment",
+
+          createdAt:
+            new Date().toISOString(),
+        }
+      );
+
+      /* -----------------------------------------
+         Initialize Paystack
+      ----------------------------------------- */
+
+      const response =
+        await fetch(
+          "https://api.paystack.co/transaction/initialize",
+          {
+            method: "POST",
+
+            headers: {
+              Authorization:
+                `Bearer ${PAYSTACK_SECRET_KEY}`,
+
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              email,
+
+              amount:
+                String(
+                  Math.round(
+                    numericAmount *
+                    100
+                  )
+                ),
+
+              currency: "NGN",
+
+              reference,
+
+              callback_url:
+                `${PUBLIC_BASE_URL}/payment/callback`,
+
+              metadata: {
+                network,
+                plan,
+                productCode,
+                phone,
+              },
+            }),
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !data.status
+      ) {
+        orders.delete(
+          reference
+        );
+
+        return res.status(400).json({
+          status: false,
+          message:
+            data.message ||
+            "Paystack initialization failed.",
+        });
+      }
+
+      res.json({
+        status: true,
+
+        authorization_url:
+          data.data.authorization_url,
+
+        access_code:
+          data.data.access_code,
+
+        reference:
+          data.data.reference,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        status: false,
+        message:
+          "Server error.",
+      });
+    }
+  }
+);
+
+
+/* =========================================================
+   PAYSTACK CALLBACK
+========================================================= */
+
+app.get(
+  "/payment/callback",
+  async (req, res) => {
+    const reference =
+      req.query.reference;
+
+    if (!reference) {
       return res.status(400).send(
-        "Could not verify payment."
+        `
+        <html>
+          <body style="font-family:Arial;text-align:center;padding:40px">
+            <h2>Missing payment reference</h2>
+            <a href="/">Back to Noorsub</a>
+          </body>
+        </html>
+        `
       );
     }
 
-    if (data.data.status !== "success") {
-      return res.status(400).send(`
-        <h2>Payment not successful</h2>
-        <p>Status: ${data.data.status}</p>
-        <a href="/">Back to Noorsub</a>
-      `);
+    try {
+      const order =
+        orders.get(reference);
+
+      if (!order) {
+        return res.status(404).send(
+          `
+          <html>
+            <body style="font-family:Arial;text-align:center;padding:40px">
+              <h2>Order not found</h2>
+              <p>Reference: ${reference}</p>
+              <a href="/">Back to Noorsub</a>
+            </body>
+          </html>
+          `
+        );
+      }
+
+      /* -----------------------------------------
+         Fulfill after verified payment
+      ----------------------------------------- */
+
+      const completedOrder =
+        await fulfillOrder(
+          reference
+        );
+
+      /* -----------------------------------------
+         Successful VTUGATE delivery
+      ----------------------------------------- */
+
+      if (
+        completedOrder.status ===
+        "fulfilled"
+      ) {
+        const transactionId =
+          completedOrder.vtugate &&
+          completedOrder.vtugate.data &&
+          completedOrder.vtugate.data
+            .transaction_id;
+
+        return res.send(
+          `
+          <html>
+            <body style="font-family:Arial;text-align:center;padding:40px">
+
+              <h1>Data Purchase Successful! ✅</h1>
+
+              <p>
+                Your Paystack payment has been verified.
+              </p>
+
+              <p>
+                Network:
+                <b>${order.network}</b>
+              </p>
+
+              <p>
+                Phone:
+                <b>${order.phone}</b>
+              </p>
+
+              <p>
+                Plan:
+                <b>${order.plan}</b>
+              </p>
+
+              ${
+                transactionId
+                  ? `
+                    <p>
+                      VTUGATE Transaction:
+                      <b>${transactionId}</b>
+                    </p>
+                  `
+                  : ""
+              }
+
+              <p>
+                Your data request was sent successfully.
+              </p>
+
+              <a href="/">
+                Back to Noorsub
+              </a>
+
+            </body>
+          </html>
+          `
+        );
+      }
+
+      /* -----------------------------------------
+         Pending
+      ----------------------------------------- */
+
+      if (
+        completedOrder.status ===
+        "pending"
+      ) {
+        return res.send(
+          `
+          <html>
+            <body style="font-family:Arial;text-align:center;padding:40px">
+
+              <h1>Payment Successful ✅</h1>
+
+              <p>
+                Paystack payment was verified.
+              </p>
+
+              <p>
+                VTUGATE is still processing the data request.
+              </p>
+
+              <p>
+                Reference:
+                <b>${reference}</b>
+              </p>
+
+              <a href="/">
+                Back to Noorsub
+              </a>
+
+            </body>
+          </html>
+          `
+        );
+      }
+
+      throw new Error(
+        "Unexpected order status."
+      );
+    } catch (error) {
+      console.error(
+        "Payment callback error:",
+        error
+      );
+
+      return res.status(500).send(
+        `
+        <html>
+          <body style="font-family:Arial;text-align:center;padding:40px">
+
+            <h2>Payment verified, but data delivery failed</h2>
+
+            <p>
+              Please do not pay again.
+            </p>
+
+            <p>
+              Reference:
+              <b>${reference}</b>
+            </p>
+
+            <a href="/">
+              Back to Noorsub
+            </a>
+
+          </body>
+        </html>
+        `
+      );
     }
+  }
+);
 
-    res.send(`
-      <html>
-        <body
-          style="
-            font-family:Arial;
-            text-align:center;
-            padding:40px
-          "
-        >
-          <h1>Payment Successful! ✅</h1>
 
-          <p>
-            Reference:
-            ${reference}
-          </p>
+/* =========================================================
+   START SERVER
+========================================================= */
 
-          <p>
-            Paystack has verified the payment.
-          </p>
-
-          <p>
-            <b>
-              VTU delivery is not enabled yet.
-            </b>
-          </p>
-
-          <a href="/">
-            Back to Noorsub
-          </a>
-        </body>
-      </html>
-    `);
-  } catch (e) {
-    console.error("Paystack callback error:", e);
-
-    res.status(500).send(
-      "Verification error."
+app.listen(
+  PORT,
+  () => {
+    console.log(
+      `Noorsub backend running on port ${PORT}`
     );
   }
-});
-
-// --------------------------------------------------
-// START SERVER
-// --------------------------------------------------
-
-app.listen(PORT, () => {
-  console.log(
-    `Noorsub backend running on port ${PORT}`
-  );
-});
+);
