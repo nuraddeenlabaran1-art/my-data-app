@@ -1,21 +1,219 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Data App</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Noorsub - Data, Airtime and Bills</title>
+
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-<div class="app">
-<h1>My Data App</h1>
-<p>Sayi Data, Airtime da Bills cikin sauƙi.</p>
-<div id="dataSection">
-<button onclick="showData()">📶 Buy Data</button>
-<button onclick="showAirtime()">📱 Buy Airtime</button>
-<button onclick="showBills()">💳 Pay Bills</button>
-</div>
-</div>
-<script src="script.js"></script>
+
+  <div class="app">
+
+    <header class="header">
+      <div class="logo">N</div>
+      <div>
+        <h1>Noorsub</h1>
+        <p>Data, Airtime da Bills cikin sauƙi.</p>
+      </div>
+    </header>
+
+    <main>
+
+      <!-- HOME -->
+      <section id="homeSection">
+        <div class="welcome">
+          <h2>Barka da zuwa Noorsub 👋</h2>
+          <p>
+            Sayi Data, Airtime da Bills cikin sauƙi,
+            cikin sauri da aminci.
+          </p>
+        </div>
+
+        <div class="menu">
+
+          <button class="menu-btn" onclick="showData()">
+            <span>📶</span>
+            <strong>Buy Data</strong>
+            <small>Sayi data bundle</small>
+          </button>
+
+          <button class="menu-btn" onclick="showAirtime()">
+            <span>📱</span>
+            <strong>Buy Airtime</strong>
+            <small>Ƙara airtime zuwa layinka</small>
+          </button>
+
+          <button class="menu-btn" onclick="showBills()">
+            <span>💳</span>
+            <strong>Pay Bills</strong>
+            <small>Biyan bills cikin sauƙi</small>
+          </button>
+
+        </div>
+      </section>
+
+
+      <!-- DATA SECTION -->
+      <section id="dataSection" style="display:none;">
+
+        <button class="back-btn" onclick="showHome()">
+          ← Back
+        </button>
+
+        <h2>Buy Data</h2>
+        <p class="section-text">
+          Zaɓi network ɗinka sannan ka zaɓi data plan.
+        </p>
+
+        <h3>Network</h3>
+
+        <div class="network-buttons">
+
+          <button onclick="selectNetwork('MTN')" id="mtnBtn">
+            MTN
+          </button>
+
+          <button onclick="selectNetwork('AIRTEL')" id="airtelBtn">
+            Airtel
+          </button>
+
+          <button onclick="selectNetwork('GLO')" id="gloBtn">
+            Glo
+          </button>
+
+          <button onclick="selectNetwork('9MOBILE')" id="nineBtn">
+            9mobile
+          </button>
+
+        </div>
+
+
+        <h3>Data Plans</h3>
+
+        <div id="plans" class="plans">
+
+          <button onclick="selectPlan(150, '500MB')" class="plan">
+            <strong>500MB</strong>
+            <span>₦150</span>
+          </button>
+
+          <button onclick="selectPlan(300, '1GB')" class="plan">
+            <strong>1GB</strong>
+            <span>₦300</span>
+          </button>
+
+          <button onclick="selectPlan(600, '2GB')" class="plan">
+            <strong>2GB</strong>
+            <span>₦600</span>
+          </button>
+
+          <button onclick="selectPlan(900, '3GB')" class="plan">
+            <strong>3GB</strong>
+            <span>₦900</span>
+          </button>
+
+          <button onclick="selectPlan(1500, '5GB')" class="plan">
+            <strong>5GB</strong>
+            <span>₦1,500</span>
+          </button>
+
+        </div>
+
+
+        <div class="form-box">
+
+          <label for="phone">
+            Phone Number
+          </label>
+
+          <input
+            type="tel"
+            id="phone"
+            placeholder="08012345678"
+            maxlength="11"
+          >
+
+
+          <label for="email">
+            Email Address
+          </label>
+
+          <input
+            type="email"
+            id="email"
+            placeholder="you@example.com"
+          >
+
+
+          <button
+            class="pay-btn"
+            onclick="payForData()"
+          >
+            💳 Pay with Paystack
+          </button>
+
+        </div>
+
+      </section>
+
+
+      <!-- AIRTIME -->
+      <section id="airtimeSection" style="display:none;">
+
+        <button class="back-btn" onclick="showHome()">
+          ← Back
+        </button>
+
+        <h2>Buy Airtime</h2>
+
+        <div class="coming-soon">
+          <div>📱</div>
+          <h3>Airtime</h3>
+          <p>
+            Wannan sashen yana zuwa nan ba da jimawa ba.
+          </p>
+        </div>
+
+      </section>
+
+
+      <!-- BILLS -->
+      <section id="billsSection" style="display:none;">
+
+        <button class="back-btn" onclick="showHome()">
+          ← Back
+        </button>
+
+        <h2>Pay Bills</h2>
+
+        <div class="coming-soon">
+          <div>💳</div>
+          <h3>Bill Payments</h3>
+          <p>
+            Wannan sashen yana zuwa nan ba da jimawa ba.
+          </p>
+        </div>
+
+      </section>
+
+
+      <!-- MESSAGE -->
+      <div id="message"></div>
+
+    </main>
+
+    <footer>
+      <p>© 2026 Noorsub</p>
+      <p>Data • Airtime • Bills</p>
+    </footer>
+
+  </div>
+
+
+  <script src="script.js"></script>
+
 </body>
 </html>
