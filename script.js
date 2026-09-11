@@ -148,7 +148,7 @@ const plans = data.data.data_plans;
                 <div style="display:grid;gap:12px;">
         `;
 
-        data.plans.forEach(function (plan) {
+        plans.forEach(function (plan) {
             const planCode =
                 plan.code ||
                 plan.plan_code ||
