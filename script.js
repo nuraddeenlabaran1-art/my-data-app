@@ -128,13 +128,13 @@ window.showPlans = async function (network) {
 
         const data = await response.json();
 
-        if (!data.status || !Array.isArray(data.plans)) {
+        if (!data.data || !Array.isArray(data.data plans)) {
             throw new Error(
                 data.message || "Unable to load data plans."
             );
         }
-
-        if (data.plans.length === 0) {
+const plans = data.data.data_plans;
+        if (plans.length === 0) {
             throw new Error("No data plans available.");
         }
 
