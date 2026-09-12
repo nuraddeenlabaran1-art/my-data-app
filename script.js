@@ -171,13 +171,15 @@ window.showPlans = async function (network) {
 
     // Support both possible response shapes
     const plans =
-      Array.isArray(result.plans)
-        ? result.plans
-        : Array.isArray(result.data)
-          ? result.data
-          : Array.isArray(result.data?.plans)
-            ? result.data.plans
-            : [];
+  Array.isArray(result.plans)
+    ? result.plans
+    : Array.isArray(result.data)
+      ? result.data
+      : Array.isArray(result.data?.plans)
+        ? result.data.plans
+        : Array.isArray(result.data?.data_plans)
+          ? result.data.data_plans
+          : [];
 
     if (!plans.length) {
       plansArea.innerHTML = `
